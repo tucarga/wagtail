@@ -1,4 +1,4 @@
-from StringIO import StringIO
+from six import StringIO
 import warnings
 
 from django.test import TestCase, Client
