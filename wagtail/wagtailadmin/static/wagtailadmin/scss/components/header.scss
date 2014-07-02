@@ -101,13 +101,6 @@ header{
     }
 }
 
-/* mozilla specific hack */
-@-moz-document url-prefix() { 
-    .iconfield.icon-spinner:after{
-        line-height:20px;
-    }
-}
-
 @media screen and (min-width: $breakpoint-mobile){
     header{
         padding-top:1.5em;
