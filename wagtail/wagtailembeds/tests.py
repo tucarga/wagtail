@@ -1,8 +1,8 @@
-from six.moves.urllib.request import urlopen
 import six.moves.urllib.request
 from six.moves.urllib.error import URLError
 
 from mock import patch
+import warnings
 
 try:
     import embedly
@@ -298,45 +298,6 @@ class TestEmbedFilter(TestCase):
         loads.return_value = {'type': 'foo',
                               'url': 'http://www.example.com'}
         temp = template.Template('{% load wagtailembeds_tags %}{{ "http://www.youtube.com/watch/"|embed }}')
-        context = template.Context()
-        result = temp.render(context)
-        self.assertEqual(result, '')
-
-
-class TestEmbedlyFilter(TestEmbedFilter):
-    def setUp(self):
-        class DummyResponse(object):
-            def read(self):
-                return "foo"
-        self.dummy_response = DummyResponse()
-
-    @patch('six.moves.urllib.request.urlopen')
-    @patch('json.loads')
-    def test_valid_embed(self, loads, urlopen):
-        urlopen.return_value = self.dummy_response
-        loads.return_value = {'type': 'photo',
-                              'url': 'http://www.example.com'}
-        result = embedly_filter('http://www.youtube.com/watch/')
-        self.assertEqual(result, '<img src="http://www.example.com" />')
-
-    @patch('six.moves.urllib.request.urlopen')
-    @patch('json.loads')
-    def test_render_filter(self, loads, urlopen):
-        urlopen.return_value = self.dummy_response
-        loads.return_value = {'type': 'photo',
-                              'url': 'http://www.example.com'}
-        temp = template.Template('{% load embed_filters %}{{ "http://www.youtube.com/watch/"|embedly }}')
-        context = template.Context()
-        result = temp.render(context)
-        self.assertEqual(result, '<img src="http://www.example.com" />')
-
-    @patch('six.moves.urllib.request.urlopen')
-    @patch('json.loads')
-    def test_render_filter_nonexistent_type(self, loads, urlopen):
-        urlopen.return_value = self.dummy_response
-        loads.return_value = {'type': 'foo',
-                              'url': 'http://www.example.com'}
-        temp = template.Template('{% load embed_filters %}{{ "http://www.youtube.com/watch/"|embedly }}')
         context = template.Context()
         result = temp.render(context)
         self.assertEqual(result, '')

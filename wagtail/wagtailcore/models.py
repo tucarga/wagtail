@@ -19,7 +19,6 @@ from django.contrib.auth.models import Group
 from django.conf import settings
 from django.template.response import TemplateResponse
 from django.utils import timezone
-from django.utils.translation import ugettext
 from django.utils.translation import ugettext_lazy as _
 from django.core.exceptions import ValidationError
 from django.utils.functional import cached_property
@@ -625,6 +624,43 @@ class Page(six.with_metaclass(PageBase, MP_Node, ClusterableModel, Indexed)):
         new_self.save()
         new_self._update_descendant_url_paths(old_url_path, new_url_path)
 
+    def copy(self, recursive=False, to=None, update_attrs=None):
+        # Make a copy
+        page_copy = Page.objects.get(id=self.id).specific
+        page_copy.pk = None
+        page_copy.id = None
+        page_copy.depth = None
+        page_copy.numchild = 0
+        page_copy.path = None
+
+        if update_attrs:
+            for field, value in update_attrs.items():
+                setattr(page_copy, field, value)
+
+        if to:
+            page_copy = to.add_child(instance=page_copy)
+        else:
+            page_copy = self.add_sibling(instance=page_copy)
+
+        # Copy child objects
+        specific_self = self.specific
+        for child_relation in getattr(specific_self._meta, 'child_relations', []):
+            parental_key_name = child_relation.field.attname
+            child_objects = getattr(specific_self, child_relation.get_accessor_name(), None)
+
+            if child_objects:
+                for child_object in child_objects.all():
+                    child_object.pk = None
+                    setattr(child_object, parental_key_name, page_copy.id)
+                    child_object.save()
+
+        # Copy child pages
+        if recursive:
+            for child_page in self.get_children():
+                child_page.specific.copy(recursive=True, to=page_copy)
+
+        return page_copy
+
     def permissions_for_user(self, user):
         """
         Return a PagePermissionsTester object defining what actions the user can perform on this page
@@ -672,6 +708,8 @@ class Page(six.with_metaclass(PageBase, MP_Node, ClusterableModel, Indexed)):
                                 "request middleware returned a response")
         return request
 
+    DEFAULT_PREVIEW_MODES = [('', 'Default')]
+
     @property
     def preview_modes(self):
         """
@@ -681,11 +719,16 @@ class Page(six.with_metaclass(PageBase, MP_Node, ClusterableModel, Indexed)):
         for example, a page containing a form might have a default view of the form,
         and a post-submission 'thankyou' page
         """
-        return self.get_page_modes()
+        modes = self.get_page_modes()
+        if modes is not Page.DEFAULT_PREVIEW_MODES:
+            # User has overriden get_page_modes instead of using preview_modes
+            warnings.warn("Overriding get_page_modes is deprecated. Define a preview_modes property instead", DeprecationWarning)
+
+        return modes
 
     def get_page_modes(self):
         # Deprecated accessor for the preview_modes property
-        return [('', 'Default')]
+        return Page.DEFAULT_PREVIEW_MODES
 
     @property
     def default_preview_mode(self):
@@ -996,10 +1039,9 @@ class UserPagePermissionsProxy(object):
 
         return editable_pages
 
-
     def can_edit_pages(self):
         """Return True if the user has permission to edit any pages"""
-        return True if self.editable_pages().count() else False
+        return self.editable_pages().exists()
 
     def publishable_pages(self):
         """Return a queryset of the pages that this user has permission to publish"""
@@ -1009,27 +1051,18 @@ class UserPagePermissionsProxy(object):
         if self.user.is_superuser:
             return Page.objects.all()
 
-        # Translate each of the user's permission rules into a Q-expression
-        q_expressions = []
-        for perm in self.permissions:
-            if perm.permission_type == 'publish':
-                # user has publish permission on any subpage of perm.page
-                # (including perm.page itself)
-                q_expressions.append(
-                    Q(path__startswith=perm.page.path)
-                )
+        publishable_pages = Page.objects.none()
 
-        if q_expressions:
-            all_rules = q_expressions[0]
-            for expr in q_expressions[1:]:
-                all_rules = all_rules | expr
-            return Page.objects.filter(all_rules)
-        else:
-            return Page.objects.none()
+        for perm in self.permissions.filter(permission_type='publish'):
+            # user has publish permission on any subpage of perm.page
+            # (including perm.page itself)
+            publishable_pages |= Page.objects.descendant_of(perm.page, inclusive=True)
+
+        return publishable_pages
 
     def can_publish_pages(self):
         """Return True if the user has permission to publish any pages"""
-        return True if self.publishable_pages().count() else False
+        return self.publishable_pages().exists()
 
 
 class PagePermissionTester(object):
